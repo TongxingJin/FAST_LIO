@@ -118,7 +118,7 @@ public:
 	typedef SparseMatrix<scalar_type> spMt;
 	typedef Matrix<scalar_type, n, 1> vectorized_state;
 	typedef Matrix<scalar_type, m, 1> flatted_state;
-	typedef flatted_state processModel(state &, const input &);
+	typedef flatted_state processModel(state &, const input &);// 定义了一种函数类型processModel
 	typedef Eigen::Matrix<scalar_type, m, n> processMatrix1(state &, const input &);
 	typedef Eigen::Matrix<scalar_type, m, process_noise_dof> processMatrix2(state &, const input &);
 	typedef Eigen::Matrix<scalar_type, process_noise_dof, process_noise_dof> processnoisecovariance;
@@ -237,7 +237,7 @@ public:
 	//calculate  measurement (z), estimate measurement (h), partial differention matrices (h_x, h_v) and the noise covariance (R) at the same time, by only one function (h_dyn_share_in).
 	void init_dyn_share(processModel f_in, processMatrix1 f_x_in, processMatrix2 f_w_in, measurementModel_dyn_share h_dyn_share_in, int maximum_iteration, scalar_type limit_vector[n])
 	{
-		f = f_in;
+		f = f_in;// f(xi, ui, 0)
 		f_x = f_x_in;
 		f_w = f_w_in;
 		h_dyn_share = h_dyn_share_in;
@@ -277,14 +277,14 @@ public:
 
 	// iterated error state EKF propogation
 	void predict(double &dt, processnoisecovariance &Q, const input &i_in){
-		flatted_state f_ = f(x_, i_in);
-		cov_ f_x_ = f_x(x_, i_in);
+		flatted_state f_ = f(x_, i_in);// 计算f
+		cov_ f_x_ = f_x(x_, i_in);// 计算Fx
 		cov f_x_final;
 
 		Matrix<scalar_type, m, process_noise_dof> f_w_ = f_w(x_, i_in);
 		Matrix<scalar_type, n, process_noise_dof> f_w_final;
 		state x_before = x_;
-		x_.oplus(f_, dt);
+		x_.oplus(f_, dt);// x = x + f * delta_t
 
 		F_x1 = cov::Identity();
 		for (std::vector<std::pair<std::pair<int, int>, int> >::iterator it = x_.vect_state.begin(); it != x_.vect_state.end(); it++) {
@@ -1622,7 +1622,7 @@ public:
 		dyn_share.valid = true;
 		dyn_share.converge = true;
 		int t = 0;
-		state x_propagated = x_;
+		state x_propagated = x_;// 预测状态
 		cov P_propagated = P_;
 		int dof_Measurement; 
 		
@@ -1630,10 +1630,10 @@ public:
 		Matrix<scalar_type, n, n> K_x; 
 		
 		vectorized_state dx_new = vectorized_state::Zero();
-		for(int i=-1; i<maximum_iter; i++)
+		for(int i=-1; i<maximum_iter; i++)// 迭代更新
 		{
 			dyn_share.valid = true;	
-			h_dyn_share(x_, dyn_share);
+			h_dyn_share(x_, dyn_share);// 根据此时的状态，计算观测h和雅可比h_x
 
 			if(! dyn_share.valid)
 			{
@@ -1649,11 +1649,11 @@ public:
 			double solve_start = omp_get_wtime();
 			dof_Measurement = h_x_.rows();
 			vectorized_state dx;
-			x_.boxminus(dx, x_propagated);
+			x_.boxminus(dx, x_propagated);// 先验
 			dx_new = dx;
 			
 			
-			
+			// 以下，根据当前状态计算Jk，结合P_propagated，计算P
 			P_ = P_propagated;
 			
 			Matrix<scalar_type, 3, 3> res_temp_SO3;
@@ -1734,7 +1734,7 @@ public:
 				h_x_cur.col(10) = h_x_.col(10);
 				h_x_cur.col(11) = h_x_.col(11);
 				*/
-				
+				// 根据P和H计算K（观测维度低，使用原始求解方法）
 				Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> K_ = P_ * h_x_cur.transpose() * (h_x_cur * P_ * h_x_cur.transpose()/R + Eigen::Matrix<double, Dynamic, Dynamic>::Identity(dof_Measurement, dof_Measurement)).inverse()/R;
 				K_h = K_ * dyn_share.h;
 				K_x = K_ * h_x_cur;
@@ -1812,7 +1812,7 @@ public:
 			}
 
 			//K_x = K_ * h_x_;
-			Matrix<scalar_type, n, 1> dx_ = K_h + (K_x - Matrix<scalar_type, n, n>::Identity()) * dx_new; 
+			Matrix<scalar_type, n, 1> dx_ = K_h + (K_x - Matrix<scalar_type, n, n>::Identity()) * dx_new; // 公式(18)
 			state x_before = x_;
 			x_.boxplus(dx_);
 			dyn_share.converge = true;
@@ -1831,7 +1831,7 @@ public:
 				dyn_share.converge = true;
 			}
 
-			if(t > 1 || i == maximum_iter - 1)
+			if(t > 1 || i == maximum_iter - 1)// 收敛，返回
 			{
 				L_ = P_;
 				//std::cout << "iteration time" << t << "," << i << std::endl; 
@@ -1921,7 +1921,7 @@ public:
 				// }
 				// else
 				//{
-					P_ = L_ - K_x.template block<n, 12>(0, 0) * P_.template block<12, n>(0, 0);
+					P_ = L_ - K_x.template block<n, 12>(0, 0) * P_.template block<12, n>(0, 0);// 公式(19)
 				//}
 				solve_time += omp_get_wtime() - solve_start;
 				return;
@@ -1953,13 +1953,13 @@ public:
 		return P_;
 	}
 private:
-	state x_;
+	state x_;// 状态
 	measurement m_;
-	cov P_;
+	cov P_;// 误差状态协方差矩阵
 	spMt l_;
 	spMt f_x_1;
 	spMt f_x_2;
-	cov F_x1 = cov::Identity();
+	cov F_x1 = cov::Identity();// 误差状态传递方程，对误差状态的雅可比
 	cov F_x2 = cov::Identity();
 	cov L_ = cov::Identity();
 
