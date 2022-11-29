@@ -152,7 +152,8 @@ void SigHandle(int sig)
 void pointBodyToWorld(PointType const * const pi, PointType * const po)
 {
     Eigen::Vector3d p_body(pi->x, pi->y, pi->z);
-    Eigen::Vector3d p_global(state.rot_end * (p_body + Lidar_offset_to_IMU) + state.pos_end);
+    // Eigen::Vector3d p_global(state.rot_end * (p_body + Lidar_offset_to_IMU) + state.pos_end);
+    Eigen::Vector3d p_global(state.rot_end * (Lidar_R_to_IMU * p_body + Lidar_offset_to_IMU) + state.pos_end);// jin    
     
     po->x = p_global(0);
     po->y = p_global(1);
@@ -164,7 +165,8 @@ template<typename T>
 void pointBodyToWorld(const Eigen::Matrix<T, 3, 1> &pi, Eigen::Matrix<T, 3, 1> &po)
 {
     Eigen::Vector3d p_body(pi[0], pi[1], pi[2]);
-    Eigen::Vector3d p_global(state.rot_end * (p_body + Lidar_offset_to_IMU) + state.pos_end);
+    // Eigen::Vector3d p_global(state.rot_end * (p_body + Lidar_offset_to_IMU) + state.pos_end);
+    Eigen::Vector3d p_global(state.rot_end * (Lidar_R_to_IMU * p_body + Lidar_offset_to_IMU) + state.pos_end);// jin    
     po[0] = p_global(0);
     po[1] = p_global(1);
     po[2] = p_global(2);
@@ -173,8 +175,9 @@ void pointBodyToWorld(const Eigen::Matrix<T, 3, 1> &pi, Eigen::Matrix<T, 3, 1> &
 void RGBpointBodyToWorld(PointType const * const pi, pcl::PointXYZI * const po)
 {
     Eigen::Vector3d p_body(pi->x, pi->y, pi->z);
-    Eigen::Vector3d p_global(state.rot_end * (p_body + Lidar_offset_to_IMU) + state.pos_end);
-    
+    // Eigen::Vector3d p_global(state.rot_end * (p_body + Lidar_offset_to_IMU) + state.pos_end);
+    Eigen::Vector3d p_global(state.rot_end * (Lidar_R_to_IMU * p_body + Lidar_offset_to_IMU) + state.pos_end);// jin    
+
     po->x = p_global(0);
     po->y = p_global(1);
     po->z = p_global(2);
@@ -591,8 +594,10 @@ bool sync_packages(MeasureGroup &meas)
     {
         meas.lidar.reset(new PointCloudXYZI());
         pcl::fromROSMsg(*(lidar_buffer.front()), *(meas.lidar));
-        meas.lidar_beg_time = lidar_buffer.front()->header.stamp.toSec();
-        lidar_end_time = meas.lidar_beg_time + meas.lidar->points.back().curvature / double(1000);
+        // meas.lidar_beg_time = lidar_buffer.front()->header.stamp.toSec();
+        // lidar_end_time = meas.lidar_beg_time + meas.lidar->points.back().curvature / double(1000);
+        lidar_end_time = lidar_buffer.front()->header.stamp.toSec();
+        meas.lidar_beg_time = lidar_end_time + meas.lidar->points.front().curvature;
         lidar_pushed = true;
     }
 
@@ -625,7 +630,8 @@ int main(int argc, char** argv)
     ros::NodeHandle nh;
 
     ros::Subscriber sub_pcl = nh.subscribe("/laser_cloud_flat", 20000, feat_points_cbk);
-    ros::Subscriber sub_imu = nh.subscribe("/livox/imu", 20000, imu_cbk);
+    // ros::Subscriber sub_imu = nh.subscribe("/livox/imu", 20000, imu_cbk);// ! 回调只是放进队列
+    ros::Subscriber sub_imu = nh.subscribe("/imu_raw", 20000, imu_cbk);
     ros::Publisher pubLaserCloudFullRes = nh.advertise<sensor_msgs::PointCloud2>
             ("/cloud_registered", 100);
     ros::Publisher pubLaserCloudEffect  = nh.advertise<sensor_msgs::PointCloud2>
@@ -724,10 +730,10 @@ int main(int argc, char** argv)
             solve_time = 0;
             pca_time   = 0;
             svd_time   = 0;
-            t0 = omp_get_wtime();
+            t0 = omp_get_wtime();// ! 获取当前时间
 
-            p_imu->Process(Measures, state, feats_undistort);
-            StatesGroup state_propagat(state);
+            p_imu->Process(Measures, state, feats_undistort);//! 对imu数据进行积分，绝对RPV保存到state，对特征点云做畸变校正
+            StatesGroup state_propagat(state);//! state_propagat作为备份的imu积分预测的位姿，state将被迭代更新
 
             if (feats_undistort->empty() || (feats_undistort == NULL))
             {
@@ -837,11 +843,11 @@ int main(int argc, char** argv)
 
                         /* transform to world frame */
                         pointBodyToWorld(&pointOri_tmpt, &pointSel_tmpt);
-                        std::vector<float> pointSearchSqDis_surf;
+                        std::vector<float> pointSearchSqDis_surf;//! 最近邻搜索的距离
                     #ifdef USE_ikdtree
                         auto &points_near = Nearest_Points[i];
                     #else
-                        auto &points_near = pointSearchInd_surf[i];
+                        auto &points_near = pointSearchInd_surf[i];//! 所有最近邻的索引
                     #endif
                         
                         if (iterCount == 0 || rematch_en)
@@ -942,8 +948,8 @@ int main(int argc, char** argv)
                                 point_selected_surf[i] = true;
                                 coeffSel_tmpt->points[i].x = pa;
                                 coeffSel_tmpt->points[i].y = pb;
-                                coeffSel_tmpt->points[i].z = pc;
-                                coeffSel_tmpt->points[i].intensity = pd2;
+                                coeffSel_tmpt->points[i].z = pc;//! 归一化后的法向量
+                                coeffSel_tmpt->points[i].intensity = pd2;//! 残差，没有取绝对值
                                 
                                 // if(i%50==0) std::cout<<"s: "<<s<<"last res: "<<res_last[i]<<" current res: "<<std::abs(pd2)<<std::endl;
                                 res_last[i] = std::abs(pd2);
@@ -956,7 +962,7 @@ int main(int argc, char** argv)
 
                         pca_time += omp_get_wtime() - pca_start;
                     }
-
+                    //! 以上，迭代所有点，计算平面参数和残差
                     double total_residual = 0.0;
                     laserCloudSelNum = 0;
 
@@ -988,7 +994,8 @@ int main(int argc, char** argv)
                     {
                         const PointType &laser_p  = laserCloudOri->points[i];
                         Eigen::Vector3d point_this(laser_p.x, laser_p.y, laser_p.z);
-                        point_this += Lidar_offset_to_IMU;
+                        // point_this += Lidar_offset_to_IMU;
+                        point_this = Lidar_R_to_IMU * point_this + Lidar_offset_to_IMU;
                         Eigen::Matrix3d point_crossmat;
                         point_crossmat<<SKEW_SYM_MATRX(point_this);
 
@@ -998,11 +1005,11 @@ int main(int argc, char** argv)
 
                         /*** calculate the Measuremnt Jacobian matrix H ***/
                         Eigen::Vector3d A(point_crossmat * state.rot_end.transpose() * norm_vec);
-                        Hsub.row(i) << VEC_FROM_ARRAY(A), norm_p.x, norm_p.y, norm_p.z;
+                        Hsub.row(i) << VEC_FROM_ARRAY(A), norm_p.x, norm_p.y, norm_p.z;//! m * 6
 
                         /*** Measuremnt: distance to the closest surface/corner ***/
-                        meas_vec(i) = - norm_p.intensity;
-                    }
+                        meas_vec(i) = - norm_p.intensity;//! norm_p.intensity是点带入到平面方程直接得到的结果
+                    }// todo 残差相对于误差状态求雅可比
 
                     Eigen::Vector3d rot_add, t_add, v_add, bg_add, ba_add, g_add;
                     Eigen::Matrix<double, DIM_OF_STATES, 1> solution;
@@ -1012,8 +1019,8 @@ int main(int argc, char** argv)
                     if (!flg_EKF_inited)
                     {
                         /*** only run in initialization period ***/
-                        Eigen::MatrixXd H_init(Eigen::Matrix<double, 9, DIM_OF_STATES>::Zero());
-                        Eigen::MatrixXd z_init(Eigen::Matrix<double, 9, 1>::Zero());
+                        Eigen::MatrixXd H_init(Eigen::Matrix<double, 9, DIM_OF_STATES>::Zero());//! m * state_dimension(18)
+                        Eigen::MatrixXd z_init(Eigen::Matrix<double, 9, 1>::Zero());//? 9维是怎么来的？
                         H_init.block<3,3>(0,0)  = Eigen::Matrix3d::Identity();
                         H_init.block<3,3>(3,3)  = Eigen::Matrix3d::Identity();
                         H_init.block<3,3>(6,15) = Eigen::Matrix3d::Identity();
@@ -1031,7 +1038,7 @@ int main(int argc, char** argv)
                     else
                     {
                         auto &&Hsub_T = Hsub.transpose();
-                        H_T_H.block<6,6>(0,0) = Hsub_T * Hsub;
+                        H_T_H.block<6,6>(0,0) = Hsub_T * Hsub;//! 6*6
                         Eigen::Matrix<double, DIM_OF_STATES, DIM_OF_STATES> &&K_1 = \
                                     (H_T_H + (state.cov / LASER_POINT_COV).inverse()).inverse();
                         K = K_1.block<DIM_OF_STATES,6>(0,0) * Hsub_T;
@@ -1039,12 +1046,12 @@ int main(int argc, char** argv)
                         // solution = K * meas_vec;
                         // state += solution;
 
-                        auto vec = state_propagat - state;
+                        auto vec = state_propagat - state;//! 预测-迭代后的结果，与论文相比差个负号，operator-定义成返回matrix
                         // solution = K * (meas_vec - Hsub * vec.block<6,1>(0,0));
                         // state = state_propagat + solution;
 
-                        solution = K * meas_vec + vec - K * Hsub * vec.block<6,1>(0,0);
-                        state += solution;
+                        solution = K * meas_vec + vec - K * Hsub * vec.block<6,1>(0,0);//! 对应fast-lio论文公式18，令Jk=I // ? 最前面不得加个负号?
+                        state += solution;//! 迭代的变量+更新量，对应fast-lio公式（18）
 
                         rot_add = solution.block<3,1>(0,0);
                         t_add   = solution.block<3,1>(3,0);
@@ -1084,7 +1091,7 @@ int main(int argc, char** argv)
                         {
                             /*** Covariance Update ***/
                             G.block<DIM_OF_STATES,6>(0,0) = K * Hsub;
-                            state.cov = (I_STATE - G) * state.cov;
+                            state.cov = (I_STATE - G) * state.cov;//! 对应fast-lio公式（18）
                             total_distance += (state.pos_end - position_last).norm();
                             position_last = state.pos_end;
                             
@@ -1094,7 +1101,7 @@ int main(int argc, char** argv)
                         break;
                     }
                     solve_time += omp_get_wtime() - solve_start;
-                }
+                }//! iEKF多次循环迭代
                 
                 std::cout<<"[ mapping ]: iteration count: "<<iterCount+1<<std::endl;
 
@@ -1183,17 +1190,21 @@ int main(int argc, char** argv)
             pcl::PointXYZI temp_point;
             laserCloudFullResColor->clear();
             {
-            for (int i = 0; i < laserCloudFullResNum; i++)
-            {
-                RGBpointBodyToWorld(&laserCloudFullRes2->points[i], &temp_point);
-                laserCloudFullResColor->push_back(temp_point);
-            }
+              static int count = 0;
+              if(count % 10 == 0){
+                for (int i = 0; i < laserCloudFullResNum; i++)
+                {
+                    RGBpointBodyToWorld(&laserCloudFullRes2->points[i], &temp_point);
+                    laserCloudFullResColor->push_back(temp_point);
+                }
 
-            sensor_msgs::PointCloud2 laserCloudFullRes3;
-            pcl::toROSMsg(*laserCloudFullResColor, laserCloudFullRes3);
-            laserCloudFullRes3.header.stamp = ros::Time::now();//.fromSec(last_timestamp_lidar);
-            laserCloudFullRes3.header.frame_id = "/camera_init";
-            pubLaserCloudFullRes.publish(laserCloudFullRes3);
+                sensor_msgs::PointCloud2 laserCloudFullRes3;
+                pcl::toROSMsg(*laserCloudFullResColor, laserCloudFullRes3);
+                laserCloudFullRes3.header.stamp = ros::Time::now();//.fromSec(last_timestamp_lidar);
+                laserCloudFullRes3.header.frame_id = "/camera_init";
+                pubLaserCloudFullRes.publish(laserCloudFullRes3);//! 当前帧所有特征，发布到世界坐标系下，topic名字"/cloud_registered"
+              }
+              count++;
             }
 
             /******* Publish Effective points *******/
@@ -1209,7 +1220,7 @@ int main(int argc, char** argv)
             pcl::toROSMsg(*laserCloudFullResColor, laserCloudFullRes3);
             laserCloudFullRes3.header.stamp = ros::Time::now();//.fromSec(last_timestamp_lidar);
             laserCloudFullRes3.header.frame_id = "/camera_init";
-            pubLaserCloudEffect.publish(laserCloudFullRes3);
+            pubLaserCloudEffect.publish(laserCloudFullRes3);//! 只发布误差足够小，实际使用的点，topic名字"/cloud_effected"
             }
 
             /******* Publish Maps:  *******/
@@ -1217,7 +1228,7 @@ int main(int argc, char** argv)
             pcl::toROSMsg(*featsFromMap, laserCloudMap);
             laserCloudMap.header.stamp = ros::Time::now();//ros::Time().fromSec(last_timestamp_lidar);
             laserCloudMap.header.frame_id = "/camera_init";
-            pubLaserCloudMap.publish(laserCloudMap);
+            pubLaserCloudMap.publish(laserCloudMap);//! 发布局部地图，topic名字是"/Laser_map"
 
             /******* Publish Odometry ******/
             geometry_msgs::Quaternion geoQuat = tf::createQuaternionMsgFromRollPitchYaw
@@ -1246,7 +1257,7 @@ int main(int argc, char** argv)
             q.setY( odomAftMapped.pose.pose.orientation.y );
             q.setZ( odomAftMapped.pose.pose.orientation.z );
             transform.setRotation( q );
-            br.sendTransform( tf::StampedTransform( transform, odomAftMapped.header.stamp, "/camera_init", "/aft_mapped" ) );
+            br.sendTransform( tf::StampedTransform( transform, odomAftMapped.header.stamp, "/camera_init", "/aft_mapped" ) );//! 发布tf变换
 
             
             msg_body_pose.header.stamp = ros::Time::now();
@@ -1265,11 +1276,11 @@ int main(int argc, char** argv)
             /******* Publish Path ********/
             msg_body_pose.header.frame_id = "/camera_init";
             path.poses.push_back(msg_body_pose);
-            pubPath.publish(path);
+            pubPath.publish(path);//! 发布路径在"/path"
 
             /*** save debug variables ***/
             frame_num ++;
-            aver_time_consu = aver_time_consu * (frame_num - 1) / frame_num + (t5 - t0) / frame_num;
+            aver_time_consu = aver_time_consu * (frame_num - 1) / frame_num + (t5 - t0) / frame_num;// ! 由于是并行的，这里计算的是代码的运行时长，而不是多线程的总时长
             // aver_time_consu = aver_time_consu * 0.8 + (t5 - t0) * 0.2;
             T1.push_back(Measures.lidar_beg_time);
             s_plot.push_back(aver_time_consu);
@@ -1282,7 +1293,7 @@ int main(int argc, char** argv)
             // fout_out << std::setw(10) << Measures.lidar_beg_time << " " << euler_cur.transpose()*57.3 << " " << state.pos_end.transpose() << " " << state.vel_end.transpose() \
             // <<" "<<state.bias_g.transpose()<<" "<<state.bias_a.transpose()<< std::endl;
             fout_out<<std::setw(8)<<laserCloudSelNum<<" "<<Measures.lidar_beg_time<<" "<<t2-t0<<" "<<match_time<<" "<<t5-t3<<" "<<t5-t0<<std::endl;
-        }
+        }//! 找下组数据，继续进行
         status = ros::ok();
         rate.sleep();
     }

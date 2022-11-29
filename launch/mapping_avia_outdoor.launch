@@ -2,10 +2,12 @@
 
   <arg name="rviz" default="true" />
 
-  <param name="lidar_type" type="int" value="1"/>
+  <!-- <param name="lidar_type" type="int" value="1"/> -->
+  <param name="lidar_type" type="int" value="4"/>
 	<param name="blind" type="double" value="0.5"/>
 	<param name="inf_bound" type="double" value="10"/>
-	<param name="N_SCANS" type="int" value="6"/>
+	<!-- <param name="N_SCANS" type="int" value="6"/> -->
+  <param name="N_SCANS" type="int" value="32"/>
 	<param name="group_size" type="int" value="8"/>
 	<param name="disA" type="double" value="0.01"/>
 	<param name="disB" type="double" value="0.1"/>

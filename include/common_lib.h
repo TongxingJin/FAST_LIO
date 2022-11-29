@@ -42,7 +42,13 @@ Eigen::Matrix3f Eye3f(Eigen::Matrix3f::Identity());
 Eigen::Vector3d Zero3d(0, 0, 0);
 Eigen::Vector3f Zero3f(0, 0, 0);
 // Eigen::Vector3d Lidar_offset_to_IMU(0.05512, 0.02226, 0.0297); // Horizon
-Eigen::Vector3d Lidar_offset_to_IMU(0.04165, 0.02326, -0.0284); // Avia
+// Eigen::Vector3d Lidar_offset_to_IMU(0.04165, 0.02326, -0.0284); // Avia
+// // yancheng
+// Eigen::Vector3d Lidar_offset_to_IMU(-0.003795264288783073, 0.3527656495571136, 1.437507152557373); // jin
+// Eigen::Quaterniond Lidar_R_to_IMU(0.3639289160070749, -0.000343156005558227, 0.0006490837473832803, 0.9314264015202568);// jin
+// jiashan
+Eigen::Vector3d Lidar_offset_to_IMU(-0.06296908110380173, 0.3799597024917603, 1.48061728477478); // jin
+Eigen::Quaterniond Lidar_R_to_IMU(0.39031, 0.0065209, 0.00804001, 0.920625);// jin
 
 struct MeasureGroup     // Lidar data and imu dates for the curent process
 {

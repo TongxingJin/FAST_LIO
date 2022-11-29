@@ -13,7 +13,7 @@ typedef pcl::PointXYZINormal PointType;
 
 ros::Publisher pub_full, pub_surf, pub_corn;
 
-enum LID_TYPE{MID, HORIZON, VELO16, OUST64};
+enum LID_TYPE{MID, HORIZON, VELO16, OUST64, HESAI32};
 
 enum Feature{Nor, Poss_Plane, Real_Plane, Edge_Jump, Edge_Plane, Wire, ZeroPoint};
 enum Surround{Prev, Next};
@@ -62,6 +62,20 @@ int plane_judge(const pcl::PointCloud<PointType> &pl, vector<orgtype> &types, ui
 bool small_plane(const pcl::PointCloud<PointType> &pl, vector<orgtype> &types, uint i_cur, uint &i_nex, Eigen::Vector3d &curr_direct);
 bool edge_jump_judge(const pcl::PointCloud<PointType> &pl, vector<orgtype> &types, uint i, Surround nor_dir);
 
+// jin
+void hesai32_handler(const sensor_msgs::PointCloud2::ConstPtr &msg);
+int checkLine(const pcl::PointXYZINormal& point){
+  double range = sqrt(point.x * point.x + point.y * point.y);
+  int line = floor(atan2(point.z, range) / M_PI * 180.0 + 16.5);
+  if(line < 0){
+    line = 0;
+    // std::cout << "set line to 0" << std::endl;
+  }else if(line >= N_SCANS){
+    line = N_SCANS - 1;
+  }
+  return line;
+}
+
 int main(int argc, char **argv)
 {
   ros::init(argc, argv, "feature_extract");
@@ -93,7 +107,7 @@ int main(int argc, char **argv)
   smallp_intersect = cos(smallp_intersect/180*M_PI);
 
   ros::Subscriber sub_points;
-  
+  std::cout << lidar_type << std::endl;
   switch(lidar_type)
   {
   case MID:
@@ -115,6 +129,11 @@ int main(int argc, char **argv)
   case OUST64:
     printf("OUST64\n");
     sub_points = n.subscribe("/os1_cloud_node/points", 1000, oust64_handler);
+    break;
+
+  case HESAI32:
+    printf("Hesai32\n");
+    sub_points = n.subscribe("/velodyne_points", 1000, hesai32_handler);
     break;
   
   default:
@@ -465,9 +484,68 @@ void oust64_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
   {
     for(int j=0; j<N_SCANS; j++)
     {
-      pl_buff[j].push_back(pl_orig[i+j]);
+      pl_buff[j].push_back(pl_orig[i+j]);//! 意思是，ouster的点云按照线依次排列，每N_SCANS为一个组合
     }
   }
+
+  for(int j=0; j<N_SCANS; j++)
+  {
+    pcl::PointCloud<PointType> &pl = pl_buff[j];
+    vector<orgtype> &types = typess[j];
+    plsize = pl.size() - 1;
+    types.resize(plsize+1);
+    for(uint i=0; i<plsize; i++)
+    {
+      types[i].range = sqrt(pl[i].x*pl[i].x + pl[i].y*pl[i].y);
+      vx = pl[i].x - pl[i+1].x;
+      vy = pl[i].y - pl[i+1].y;
+      vz = pl[i].z - pl[i+1].z;
+      types[i].dista = vx*vx + vy*vy + vz*vz;
+    }
+    types[plsize].range = sqrt(pl[plsize].x*pl[plsize].x + pl[plsize].y*pl[plsize].y);
+    give_feature(pl, types, pl_corn, pl_surf);
+  }
+
+  pub_func(pl_orig, pub_full, msg->header.stamp);
+  pub_func(pl_surf, pub_surf, msg->header.stamp);
+  pub_func(pl_corn, pub_corn, msg->header.stamp);
+}
+
+
+
+void hesai32_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
+{
+  pcl::PointCloud<PointType> pl_orig;
+  pcl::fromROSMsg(*msg, pl_orig);
+  vector<pcl::PointCloud<PointType>> pl_buff(N_SCANS);
+  vector<vector<orgtype>> typess(N_SCANS);
+  pcl::PointCloud<PointType> pl_corn, pl_surf;
+
+  uint plsize = pl_orig.size();
+
+  pl_corn.reserve(plsize); pl_surf.reserve(plsize);
+  for(int i=0; i<N_SCANS; i++)
+  {
+    pl_buff[i].reserve(plsize);
+  }
+
+  // for(uint i=0; i<plsize; i+=N_SCANS)
+  // {
+  //   for(int j=0; j<N_SCANS; j++)
+  //   {
+  //     pl_buff[j].push_back(pl_orig[i+j]);
+  //   }
+  // }
+  for(int index = 0; index < pl_orig.size(); ++index){
+    const auto& point  = pl_orig[index];
+    int line = checkLine(point);
+    pl_buff[line].push_back(point);
+  }
+  std::cout << "size: ";
+  for(int index = 0; index < N_SCANS; ++index){
+    std::cout << pl_buff[index].size() << ", ";
+  }
+  std::cout << std::endl;
 
   for(int j=0; j<N_SCANS; j++)
   {
