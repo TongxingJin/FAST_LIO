@@ -76,6 +76,7 @@ bool   runtime_pos_log = false, pcd_save_en = false, time_sync_en = false, extri
 float res_last[100000] = {0.0};
 float DET_RANGE = 300.0f;
 const float MOV_THRESHOLD = 1.5f;
+double time_diff_lidar_to_imu = 0.0;
 
 mutex mtx_buffer;
 condition_variable sig_buffer;
@@ -342,6 +343,8 @@ void imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in)
         msg->header.stamp = \
         ros::Time().fromSec(timediff_lidar_wrt_imu + msg_in->header.stamp.toSec());
     }
+
+    msg->header.stamp = ros::Time().fromSec(msg_in->header.stamp.toSec() - time_diff_lidar_to_imu);
 
     double timestamp = msg->header.stamp.toSec();
 
@@ -760,6 +763,7 @@ int main(int argc, char** argv)
     nh.param<string>("common/lid_topic",lid_topic,"/livox/lidar");
     nh.param<string>("common/imu_topic", imu_topic,"/livox/imu");
     nh.param<bool>("common/time_sync_en", time_sync_en, false);
+    nh.param<double>("common/time_offset_lidar_to_imu", time_diff_lidar_to_imu, 0.0);
     nh.param<double>("filter_size_corner",filter_size_corner_min,0.5);
     nh.param<double>("filter_size_surf",filter_size_surf_min,0.5);
     nh.param<double>("filter_size_map",filter_size_map_min,0.5);
@@ -773,6 +777,7 @@ int main(int argc, char** argv)
     nh.param<double>("preprocess/blind", p_pre->blind, 0.01);
     nh.param<int>("preprocess/lidar_type", p_pre->lidar_type, AVIA);
     nh.param<int>("preprocess/scan_line", p_pre->N_SCANS, 16);
+    nh.param<int>("preprocess/timestamp_unit", p_pre->time_unit, US);
     nh.param<int>("preprocess/scan_rate", p_pre->SCAN_RATE, 10);
     nh.param<int>("point_filter_num", p_pre->point_filter_num, 2);
     nh.param<bool>("feature_extract_enable", p_pre->feature_enabled, false);
