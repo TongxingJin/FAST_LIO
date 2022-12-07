@@ -52,9 +52,9 @@ Eigen::Matrix<double, 24, 1> get_f(state_ikfom &s, const input_ikfom &in)
 	in.gyro.boxminus(omega, s.bg);
 	vect3 a_inertial = s.rot * (in.acc-s.ba); 
 	for(int i = 0; i < 3; i++ ){
-		res(i) = s.vel[i];
-		res(i + 3) =  omega[i]; 
-		res(i + 12) = a_inertial[i] + s.grav[i]; 
+		res(i) = s.vel[i];//! 假设匀速直线运动？对应公式（5）第2行
+		res(i + 3) =  omega[i]; //! 对应公式（5）第1行
+		res(i + 12) = a_inertial[i] + s.grav[i]; //! 对应公式（5）第3行
 	}
 	return res;
 }

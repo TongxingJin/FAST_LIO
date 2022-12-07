@@ -298,7 +298,7 @@ void Preprocess::velodyne_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
       }
     }
 
-    if(feature_enabled)
+    if(feature_enabled)//! 如果需要提特征？
     {
       for (int i = 0; i < N_SCANS; i++)
       {
@@ -389,7 +389,7 @@ void Preprocess::velodyne_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
         added_pt.intensity = pl_orig.points[i].intensity;
         added_pt.curvature = pl_orig.points[i].time / 1000.0;  // curvature unit: ms
 
-        if (!given_offset_time)
+        if (!given_offset_time)//! 如果没有单点的时间戳
         {
           int layer = pl_orig.points[i].ring;
           double yaw_angle = atan2(added_pt.y, added_pt.x) * 57.2957;
@@ -421,9 +421,9 @@ void Preprocess::velodyne_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
           time_last[layer]=added_pt.curvature;
         }
 
-        if (i % point_filter_num == 0)
+        if (i % point_filter_num == 0)//! 做1/4的降采样
         {
-          if(added_pt.x*added_pt.x+added_pt.y*added_pt.y+added_pt.z*added_pt.z > (blind * blind))
+          if(added_pt.x*added_pt.x+added_pt.y*added_pt.y+added_pt.z*added_pt.z > (blind * blind))//! 半径16m以内的点不要
           {
             pl_surf.points.push_back(added_pt);
           }

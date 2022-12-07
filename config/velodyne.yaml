@@ -1,6 +1,6 @@
 common:
     lid_topic:  "/velodyne_points"
-    imu_topic:  "/imu/data"
+    imu_topic:  "/imu_raw"
     time_sync_en: false         # ONLY turn on when external time synchronization is really not possible
     
 preprocess:
@@ -17,10 +17,10 @@ mapping:
     fov_degree:    180
     det_range:     100.0
     extrinsic_est_en:  true      # true: enable the online estimation of IMU-LiDAR extrinsic,
-    extrinsic_T: [ 0, 0, 0.28]
-    extrinsic_R: [ 1, 0, 0, 
-                   0, 1, 0, 
-                   0, 0, 1]
+    extrinsic_T: [ -0.063, 0.38, 1.481]
+    extrinsic_R: [ -0.695231, -0.718554, 0.0182828,
+000.718764, -0.695187, 0.00971333,
+0.00573042, 000.019894, 000.999786]
 
 publish:
     path_en:  false
