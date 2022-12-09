@@ -58,7 +58,7 @@ class ImuProcess
   V3D cov_gyr_scale;
   V3D cov_bias_gyr;
   V3D cov_bias_acc;
-  double first_lidar_time;
+  double first_lidar_time;// * 第一帧雷达的开始时间
 
  private:
   void IMU_init(const MeasureGroup &meas, esekfom::esekf<state_ikfom, 12, input_ikfom> &kf_state, int &N);
@@ -239,7 +239,7 @@ void ImuProcess::UndistortPcl(const MeasureGroup &meas, esekfom::esekf<state_ikf
   double dt = 0;
 
   input_ikfom in;
-  for (auto it_imu = v_imu.begin(); it_imu < (v_imu.end() - 1); it_imu++)
+  for (auto it_imu = v_imu.begin(); it_imu < (v_imu.end() - 1); it_imu++)// 
   {
     auto &&head = *(it_imu);
     auto &&tail = *(it_imu + 1);
@@ -257,14 +257,14 @@ void ImuProcess::UndistortPcl(const MeasureGroup &meas, esekfom::esekf<state_ikf
 
     acc_avr     = acc_avr * G_m_s2 / mean_acc.norm(); // - state_inout.ba;// TODO:???
 
-    if(head->header.stamp.toSec() < last_lidar_end_time_)
+    if(head->header.stamp.toSec() < last_lidar_end_time_)// * 如果是第一个imu区间
     {
       dt = tail->header.stamp.toSec() - last_lidar_end_time_;
       // dt = tail->header.stamp.toSec() - pcl_beg_time;
     }
     else
     {
-      dt = tail->header.stamp.toSec() - head->header.stamp.toSec();
+      dt = tail->header.stamp.toSec() - head->header.stamp.toSec();// todo 最后半个区间不计？
     }
     
     in.acc = acc_avr;
@@ -339,12 +339,12 @@ void ImuProcess::Process(const MeasureGroup &meas,  esekfom::esekf<state_ikfom, 
   double t1,t2,t3;
   t1 = omp_get_wtime();
 
-  if(meas.imu.empty()) {return;};
+  if(meas.imu.empty()) {return;};// ! 没有imu数据会直接返回，相当于跳过这一帧
   ROS_ASSERT(meas.lidar != nullptr);
 
   if (imu_need_init_)
   {
-    /// The very first lidar frame
+    /// The very first lidar framelocalization_pose
     IMU_init(meas, kf_state, init_iter_num);
 
     imu_need_init_ = true;

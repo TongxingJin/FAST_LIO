@@ -88,7 +88,7 @@ double res_mean_last = 0.05, total_residual = 0.0;
 double last_timestamp_lidar = 0, last_timestamp_imu = -1.0;
 double gyr_cov = 0.1, acc_cov = 0.1, b_gyr_cov = 0.0001, b_acc_cov = 0.0001;
 double filter_size_corner_min = 0, filter_size_surf_min = 0, filter_size_map_min = 0, fov_deg = 0;
-double cube_len = 0, HALF_FOV_COS = 0, FOV_DEG = 0, total_distance = 0, lidar_end_time = 0, first_lidar_time = 0.0;
+double cube_len = 0, HALF_FOV_COS = 0, FOV_DEG = 0, total_distance = 0, lidar_end_time = 0, first_lidar_time = 0.0;// * 第一帧雷达的开始时间
 int    effct_feat_num = 0, time_log_counter = 0, scan_count = 0, publish_count = 0;
 int    iterCount = 0, feats_down_size = 0, NUM_MAX_ITERATIONS = 0, laserCloudValidNum = 0, pcd_save_interval = -1, pcd_index = 0;
 bool   point_selected_surf[100000] = {0};
@@ -365,7 +365,7 @@ double lidar_mean_scantime = 0.0;
 int    scan_num = 0;
 bool sync_packages(MeasureGroup &meas)
 {
-    if (lidar_buffer.empty() || imu_buffer.empty()) {
+    if (lidar_buffer.empty() || imu_buffer.empty()) {// * 都不能为空
         return false;
     }
 
@@ -395,7 +395,7 @@ bool sync_packages(MeasureGroup &meas)
         lidar_pushed = true;
     }
 
-    if (last_timestamp_imu < lidar_end_time)
+    if (last_timestamp_imu < lidar_end_time) // * 一定要等到lidar_end_time后也接收到了imu数据，否则直接返回等待下一次循环，这样才能保证lidar_end_time之前的imu都被接收到了
     {
         return false;
     }
@@ -406,7 +406,7 @@ bool sync_packages(MeasureGroup &meas)
     while ((!imu_buffer.empty()) && (imu_time < lidar_end_time))
     {
         imu_time = imu_buffer.front()->header.stamp.toSec();
-        if(imu_time > lidar_end_time) break;
+        if(imu_time > lidar_end_time) break;// * 找到最后一个在lidar_end_time之前的时间戳。1.lidar_beg_time之前的怎么处理？2.imu丢失导致没有数据怎么办->会在处理时直接返回
         meas.imu.push_back(imu_buffer.front());
         imu_buffer.pop_front();
     }
@@ -861,14 +861,14 @@ int main(int argc, char** argv)
     {
         if (flg_exit) break;
         ros::spinOnce();
-        if(sync_packages(Measures)) 
+        if(sync_packages(Measures)) // * 成功的话，至少会返回点云。对于第一帧点云，可能返回100ms之前的数据，line 871 continue不处理；其他帧有可能出现丢imu或者imu在初始化，都会在line 889 continue 
         {
             if (flg_first_scan)
             {
                 first_lidar_time = Measures.lidar_beg_time;
                 p_imu->first_lidar_time = first_lidar_time;
                 flg_first_scan = false;
-                continue;
+                continue;// ! 只初始化个时间就跳出本次循环了？第一帧点云，可能带着很多不止100ms以前的imu数据，都会直接扔掉不处理
             }
 
             double t0,t1,t2,t3,t4,t5,match_start, solve_start, svd_time;
@@ -879,11 +879,11 @@ int main(int argc, char** argv)
             solve_const_H_time = 0;
             svd_time   = 0;
             t0 = omp_get_wtime();
-            p_imu->Process(Measures, kf, feats_undistort);//! kalman预测，并进行点云畸变校正
+            p_imu->Process(Measures, kf, feats_undistort);//! kalman预测，并进行点云畸变校正。没有imu数据会直接返回，
             state_point = kf.get_x();
             pos_lid = state_point.pos + state_point.rot * state_point.offset_T_L_I;//! 雷达的位姿
 
-            if (feats_undistort->empty() || (feats_undistort == NULL))
+            if (feats_undistort->empty() || (feats_undistort == NULL))// ! 数据丢失，或者imu正在初始化，会导致上面p_imu->Process直接返回，feats_undistort为空
             {
                 ROS_WARN("No point, skip this scan!\n");
                 continue;
