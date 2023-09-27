@@ -87,3 +87,7 @@ catkin_package(
 add_executable(fastlio_mapping src/laserMapping.cpp include/ikd-Tree/ikd-Tree/ikd_Tree.cpp src/preprocess.cpp)
 target_link_libraries(fastlio_mapping ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${PYTHON_LIBRARIES})
 target_include_directories(fastlio_mapping PRIVATE ${PYTHON_INCLUDE_DIRS} include/ikd-Tree)
+
+add_executable(align_point_cloud src/align_point_cloud.cpp)
+target_link_libraries(align_point_cloud ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${PYTHON_LIBRARIES} glog)
+target_include_directories(align_point_cloud PRIVATE ${PYTHON_INCLUDE_DIRS} include/ikd-Tree)

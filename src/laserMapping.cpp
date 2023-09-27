@@ -60,6 +60,7 @@
 #include <livox_ros_driver/CustomMsg.h>
 #include "preprocess.h"
 #include <ikd-Tree/ikd_Tree.h>
+#include <pcl/common/transforms.h>
 
 #define INIT_TIME           (0.1)
 #define LASER_POINT_COV     (0.001)
@@ -326,6 +327,9 @@ void livox_pcl_cbk(const livox_ros_driver::CustomMsg::ConstPtr &msg)
     p_pre->process(msg, ptr);
     lidar_buffer.push_back(ptr);
     time_buffer.push_back(last_timestamp_lidar);
+    // std::string time_string = std::to_string(last_timestamp_lidar);
+    // std::replace(time_string.begin(), time_string.end(), '.', '_');
+    // pcl::io::savePCDFileBinaryCompressed("/media/jin/MyPassport/NTU_HELMET/20230823-1524/2023-08-23-15-24-12/frameClouds/" + time_string + ".pcd", *ptr);
     
     s_plot11[scan_count] = omp_get_wtime() - preprocess_start_time;
     mtx_buffer.unlock();
@@ -853,6 +857,13 @@ int main(int argc, char** argv)
             ("/Odometry", 100000);
     ros::Publisher pubPath          = nh.advertise<nav_msgs::Path> 
             ("/path", 100000);
+    // debug
+    ros::Publisher pubLaserCloudTmp = nh.advertise<sensor_msgs::PointCloud2>
+            ("/cloud_global_aligned", 100000);
+    ros::Publisher pubDeltaOdom = nh.advertise<nav_msgs::Odometry> 
+        ("/DeltaOdometry", 100000);
+    PointCloudXYZI tmp_cloud_global_aligned_map;
+    int scans_in_map = 0;
 //------------------------------------------------------------------------------------------------------
     signal(SIGINT, SigHandle);
     ros::Rate rate(5000);
@@ -959,8 +970,81 @@ int main(int argc, char** argv)
             geoQuat.y = state_point.rot.coeffs()[1];
             geoQuat.z = state_point.rot.coeffs()[2];
             geoQuat.w = state_point.rot.coeffs()[3];
-
+            auto qua_lid = state_point.rot * state_point.offset_R_L_I;//! jin add
+            // std::cout << qua_lid.matrix() << std::endl;
             double t_update_end = omp_get_wtime();
+
+            //! jin
+            
+            Eigen::Vector3d global_gravity(0.0, 0.0, -state_point.grav.length);
+            Eigen::AngleAxisd delta_rot(std::acos((global_gravity.dot(state_point.grav.vec))/(std::pow(state_point.grav.length, 2))), (global_gravity.cross(state_point.grav.vec)).normalized());// current -> global
+            std::string time_string = std::to_string(Measures.lidar_end_time);
+            std::replace(time_string.begin(), time_string.end(), '.', '_');
+            // std::ofstream of("/media/jin/MyPassport/NTU_HELMET/20230823-1524/2023-08-23-15-24-12/frameClouds/" + time_string + ".txt");
+            Eigen::Matrix<double, 4, 4> new_pose;
+            new_pose << qua_lid.matrix() * delta_rot.matrix(), pos_lid,
+                  0.0, 0.0, 0.0, 1.0;// 当前水平，相对于初始时刻的
+
+            Eigen::Matrix<double, 4, 4> delta_pose;
+            delta_pose << delta_rot.matrix().inverse(), Eigen::Vector3d::Zero(),
+                          0.0, 0.0, 0.0, 1.0;// 当前相对于水平, need to be published
+
+            static bool initial_map = false;
+            static Eigen::Matrix<double, 4, 4> offset_pose;
+            if(!initial_map){
+              offset_pose = delta_pose; 
+              initial_map = true;
+            }
+
+            Eigen::Matrix<double, 4, 4> global_horizon_pose;
+            global_horizon_pose = offset_pose * new_pose;// 当前水平相对于初始水平
+            // of << global_horizon_pose;
+            // of.close();
+
+            
+            PointCloudXYZI tmp_cloud;
+            pcl::transformPointCloud(*feats_undistort, tmp_cloud, delta_pose.cast<float>());
+            // pcl::io::savePCDFileBinaryCompressed("/media/jin/MyPassport/NTU_HELMET/20230823-1524/2023-08-23-15-24-12/frameClouds/" + time_string + ".pcd", tmp_cloud);
+            PointCloudXYZI tmp_cloud_global_aligned;
+            pcl::transformPointCloud(*feats_undistort, tmp_cloud_global_aligned, (global_horizon_pose * delta_pose).cast<float>());
+            tmp_cloud_global_aligned_map += tmp_cloud_global_aligned;
+            scans_in_map++;
+            if(scans_in_map >= 50 && scans_in_map % 10 == 0){
+              // if(tmp_cloud_global_aligned_map.size() > 1e6){
+                // pcl::RandomSample<PointType> downsample;
+                // downsample.setInputCloud(tmp_cloud_global_aligned_map.makeShared());
+                // downsample.setSample(0.7 * tmp_cloud_global_aligned_map.points.size());
+                // downsample.filter(tmp_cloud_global_aligned_map);
+                pcl::VoxelGrid<PointType> downSizeFilter;
+                downSizeFilter.setLeafSize(0.08, 0.08, 0.08);
+                downSizeFilter.setInputCloud(tmp_cloud_global_aligned_map.makeShared());
+                downSizeFilter.filter(tmp_cloud_global_aligned_map);
+              // }
+              PointCloudXYZI tmp_cloud_global_aligned_map_local;
+              pcl::transformPointCloud(tmp_cloud_global_aligned_map, tmp_cloud_global_aligned_map_local, global_horizon_pose.inverse().cast<float>());
+              sensor_msgs::PointCloud2 laserCloudmsg;
+              pcl::toROSMsg(tmp_cloud_global_aligned_map_local, laserCloudmsg);
+              laserCloudmsg.header.stamp = ros::Time().fromSec(lidar_end_time);
+              laserCloudmsg.header.frame_id = "camera_init";
+              pubLaserCloudTmp.publish(laserCloudmsg);
+              
+              nav_msgs::Odometry delta_odo;
+              delta_odo.header.frame_id = "camera_init";
+              delta_odo.child_frame_id = "real_body";
+              delta_odo.header.stamp = ros::Time().fromSec(lidar_end_time);// ros::Time().fromSec(lidar_end_time);
+              delta_odo.pose.pose.position.x = 0.0;
+              delta_odo.pose.pose.position.y = 0.0;
+              delta_odo.pose.pose.position.z = 0.0;
+              Eigen::Quaterniond q(delta_rot.matrix().inverse());
+              delta_odo.pose.pose.orientation.x = q.x();
+              delta_odo.pose.pose.orientation.y = q.y();
+              delta_odo.pose.pose.orientation.z = q.z();
+              delta_odo.pose.pose.orientation.w = q.w();
+              pubDeltaOdom.publish(delta_odo);
+            }
+
+
+            
 
             /******* Publish odometry *******/
             publish_odometry(pubOdomAftMapped);
