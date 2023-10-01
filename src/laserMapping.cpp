@@ -301,6 +301,7 @@ double timediff_lidar_wrt_imu = 0.0;
 bool   timediff_set_flg = false;
 void livox_pcl_cbk(const livox_ros_driver::CustomMsg::ConstPtr &msg) 
 {
+  std::cout << "pc callback" << std::endl;
     mtx_buffer.lock();
     double preprocess_start_time = omp_get_wtime();
     scan_count ++;
@@ -338,6 +339,8 @@ void livox_pcl_cbk(const livox_ros_driver::CustomMsg::ConstPtr &msg)
 
 void imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in) 
 {
+    std::cout << "imu callback" << std::endl;
+
     publish_count ++;
     // cout<<"IMU got at: "<<msg_in->header.stamp.toSec()<<endl;
     sensor_msgs::Imu::Ptr msg(new sensor_msgs::Imu(*msg_in));
@@ -874,12 +877,14 @@ int main(int argc, char** argv)
         ros::spinOnce();
         if(sync_packages(Measures)) 
         {
+            cout << "Round===" << endl;
             if (flg_first_scan)
             {
                 first_lidar_time = Measures.lidar_beg_time;
                 p_imu->first_lidar_time = first_lidar_time;
                 flg_first_scan = false;
-                continue;
+                cout << "first scan, continue" << endl;
+                continue;//! jin:第一帧进来什么也不做，只是初始化了时间
             }
 
             double t0,t1,t2,t3,t4,t5,match_start, solve_start, svd_time;
@@ -890,7 +895,7 @@ int main(int argc, char** argv)
             solve_const_H_time = 0;
             svd_time   = 0;
             t0 = omp_get_wtime();
-            p_imu->Process(Measures, kf, feats_undistort);//! kalman预测，并进行点云畸变校正
+            p_imu->Process(Measures, kf, feats_undistort);//! kalman预测，并进行点云畸变校正；也有可能只是进行了imu的初始化
             state_point = kf.get_x();
             pos_lid = state_point.pos + state_point.rot * state_point.offset_T_L_I;//! 雷达的位姿
 
@@ -923,6 +928,7 @@ int main(int argc, char** argv)
                     }
                     ikdtree.Build(feats_down_world->points);
                 }
+                cout << "tree is built" << endl;
                 continue;
             }
             int featsFromMapNum = ikdtree.validnum();//! 地图树中有效点的数目
@@ -962,7 +968,8 @@ int main(int argc, char** argv)
             /*** iterated state estimation ***/
             double t_update_start = omp_get_wtime();
             double solve_H_time = 0;
-            kf.update_iterated_dyn_share_modified(LASER_POINT_COV, solve_H_time);//! 更新
+            cout << "update!" << endl;
+            kf.update_iterated_dyn_share_modified(LASER_POINT_COV, solve_H_time);//! 更新，此时点云还在雷达坐标系，因为需要对外参进行估计
             state_point = kf.get_x();//! 更新后的状态
             euler_cur = SO3ToEuler(state_point.rot);
             pos_lid = state_point.pos + state_point.rot * state_point.offset_T_L_I;
@@ -976,7 +983,7 @@ int main(int argc, char** argv)
 
             //! jin
             
-            Eigen::Vector3d global_gravity(0.0, 0.0, -state_point.grav.length);
+            Eigen::Vector3d global_gravity(0.0, 0.0, -state_point.grav.length);//! todo 外参比较大的话这个需要重新考虑，需要将grav测量量转到lidar系下
             // Eigen::Matrix3d delta_rot(std::acos((global_gravity.dot(state_point.grav.vec))/(std::pow(state_point.grav.length, 2))), (global_gravity.cross(state_point.grav.vec)).normalized().marix().inverse());// global -> current
             Eigen::Matrix3d delta_rot(Eigen::AngleAxisd(std::acos((state_point.grav.vec.dot(global_gravity)) / std::pow(state_point.grav.length, 2)), (state_point.grav.vec.cross(global_gravity)).normalized()).matrix());// global -> current
             std::string time_string = std::to_string(Measures.lidar_end_time);

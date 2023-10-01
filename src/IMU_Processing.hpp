@@ -239,6 +239,7 @@ void ImuProcess::UndistortPcl(const MeasureGroup &meas, esekfom::esekf<state_ikf
   double dt = 0;
 
   input_ikfom in;
+  cout << "Last lidar end time: " << last_lidar_end_time_ << endl;
   for (auto it_imu = v_imu.begin(); it_imu < (v_imu.end() - 1); it_imu++)
   {
     auto &&head = *(it_imu);
@@ -257,7 +258,7 @@ void ImuProcess::UndistortPcl(const MeasureGroup &meas, esekfom::esekf<state_ikf
 
     acc_avr     = acc_avr * G_m_s2 / mean_acc.norm(); // - state_inout.ba;// TODO:???
 
-    if(head->header.stamp.toSec() < last_lidar_end_time_)
+    if(head->header.stamp.toSec() < last_lidar_end_time_)//! jin:第一组进行积分的，实际上last_lidar_end_time_==0,没有执行这个函数
     {
       dt = tail->header.stamp.toSec() - last_lidar_end_time_;
       // dt = tail->header.stamp.toSec() - pcl_beg_time;
@@ -352,7 +353,7 @@ void ImuProcess::Process(const MeasureGroup &meas,  esekfom::esekf<state_ikfom, 
     last_imu_   = meas.imu.back();
 
     state_ikfom imu_state = kf_state.get_x();
-    if (init_iter_num > MAX_INI_COUNT)
+    if (init_iter_num > MAX_INI_COUNT)//! 对livox来说100hz imu，一次就可以完成初始化
     {
       cov_acc *= pow(G_m_s2 / mean_acc.norm(), 2);
       imu_need_init_ = false;
@@ -364,10 +365,10 @@ void ImuProcess::Process(const MeasureGroup &meas,  esekfom::esekf<state_ikfom, 
       //          imu_state.grav[0], imu_state.grav[1], imu_state.grav[2], mean_acc.norm(), cov_bias_gyr[0], cov_bias_gyr[1], cov_bias_gyr[2], cov_acc[0], cov_acc[1], cov_acc[2], cov_gyr[0], cov_gyr[1], cov_gyr[2]);
       fout_imu.open(DEBUG_FILE_DIR("imu.txt"),ios::out);
     }
-
-    return;
+    cout << "neead more imu init, return before undistortion" << endl;
+    return;//! 还未完成imu初始化，直接返回，不进行点云畸变校正
   }
-
+  cout << "undistortion" << endl;
   UndistortPcl(meas, kf_state, *cur_pcl_un_);
 
   t2 = omp_get_wtime();
