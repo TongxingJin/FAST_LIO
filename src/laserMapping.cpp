@@ -339,7 +339,7 @@ void livox_pcl_cbk(const livox_ros_driver::CustomMsg::ConstPtr &msg)
 
 void imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in) 
 {
-    std::cout << "imu callback" << std::endl;
+    // std::cout << "imu callback" << std::endl;
 
     publish_count ++;
     // cout<<"IMU got at: "<<msg_in->header.stamp.toSec()<<endl;
@@ -759,6 +759,28 @@ void h_share_model(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_
     solve_time += omp_get_wtime() - solve_start_;
 }
 
+Eigen::Matrix3d GetHorizon(const Eigen::Matrix3d& r) {
+  Eigen::Vector3d ypr;
+
+  if (r(2, 0) < 1) {
+    if (r(2, 0) > -1) {
+      ypr.y() = std::asin(-r(2, 0));
+      ypr.x() = std::atan2(r(1, 0), r(0, 0));
+      ypr.z() = std::atan2(r(2, 1), r(2, 2));
+    } else {
+      ypr.y() = M_PI_2;
+      ypr.x() = -std::atan2(-r(1, 2), r(1, 1));
+      ypr.z() = 0.0;
+    }
+  } else {
+    ypr.y() = -M_PI_2;
+    ypr.x() = std::atan2(-r(1, 2), r(1, 1));
+    ypr.z() = 0.0;
+  }
+
+  return (Eigen::AngleAxisd((ypr.x()), Eigen::Vector3d::UnitZ())).toRotationMatrix();
+}
+
 int main(int argc, char** argv)
 {
     ros::init(argc, argv, "laserMapping");
@@ -866,6 +888,9 @@ int main(int argc, char** argv)
     ros::Publisher pubDeltaOdom = nh.advertise<nav_msgs::Odometry> 
         ("/DeltaOdometry", 100000);
     PointCloudXYZI tmp_cloud_global_aligned_map;
+    PointCloudXYZI global_map;
+    PointCloudXYZI global_map_aligned;
+
     int scans_in_map = 0;
 //------------------------------------------------------------------------------------------------------
     signal(SIGINT, SigHandle);
@@ -982,66 +1007,50 @@ int main(int argc, char** argv)
             double t_update_end = omp_get_wtime();
 
             //! jin
-            
-            Eigen::Vector3d global_gravity(0.0, 0.0, -state_point.grav.length);//! todo 外参比较大的话这个需要重新考虑，需要将grav测量量转到lidar系下
-            // Eigen::Matrix3d delta_rot(std::acos((global_gravity.dot(state_point.grav.vec))/(std::pow(state_point.grav.length, 2))), (global_gravity.cross(state_point.grav.vec)).normalized().marix().inverse());// global -> current
+            Eigen::Vector3d global_gravity(0.0, 0.0, -state_point.grav.length);//! todo 外参比较大的话这个需要重新考虑，需要将grav测量量转到lidar系下 //todo 这个跟align_point文件是不一样的
             Eigen::Matrix3d delta_rot(Eigen::AngleAxisd(std::acos((state_point.grav.vec.dot(global_gravity)) / std::pow(state_point.grav.length, 2)), (state_point.grav.vec.cross(global_gravity)).normalized()).matrix());// global -> current
-            std::string time_string = std::to_string(Measures.lidar_end_time);
-            std::replace(time_string.begin(), time_string.end(), '.', '_');
-            // std::ofstream of("/media/jin/MyPassport/NTU_HELMET/20230823-1524/2023-08-23-15-24-12/frameClouds/" + time_string + ".txt");
-            Eigen::Matrix<double, 4, 4> new_pose;
-            new_pose << qua_lid.matrix() * delta_rot.inverse(), pos_lid,
-                  0.0, 0.0, 0.0, 1.0;// 当前水平，相对于初始时刻的
+            std::cout << "delta rot: " << std::acos((state_point.grav.vec.dot(global_gravity)) / std::pow(state_point.grav.length, 2)) * 180.0 / M_PI << std::endl;
+            //! 以上，初始时刻姿态相对于水平姿态的
 
             Eigen::Matrix<double, 4, 4> delta_pose;
             delta_pose << delta_rot, Eigen::Vector3d::Zero(),
-                          0.0, 0.0, 0.0, 1.0;// 当前相对于水平, need to be published
+                          0.0, 0.0, 0.0, 1.0;
 
-            static bool initial_map = false;
-            static Eigen::Matrix<double, 4, 4> offset_pose;
-            if(!initial_map){
-              offset_pose = delta_pose; 
-              initial_map = true;
-            }
-
-            Eigen::Matrix<double, 4, 4> global_horizon_pose;
-            global_horizon_pose = offset_pose * new_pose;// 当前水平相对于初始水平
-            // of << global_horizon_pose;
-            // of.close();
-
-            
+            Eigen::Matrix<double, 4, 4> lidar_pose;
+            lidar_pose << qua_lid.matrix(), pos_lid,
+                  0.0, 0.0, 0.0, 1.0;
             PointCloudXYZI tmp_cloud;
-            pcl::transformPointCloud(*feats_undistort, tmp_cloud, delta_pose.cast<float>());
-            // pcl::io::savePCDFileBinaryCompressed("/media/jin/MyPassport/NTU_HELMET/20230823-1524/2023-08-23-15-24-12/frameClouds/" + time_string + ".pcd", tmp_cloud);
-            PointCloudXYZI tmp_cloud_global_aligned;
-            pcl::transformPointCloud(*feats_undistort, tmp_cloud_global_aligned, (global_horizon_pose * delta_pose).cast<float>());
-            tmp_cloud_global_aligned_map += tmp_cloud_global_aligned;
+            pcl::transformPointCloud(*feats_undistort, tmp_cloud, lidar_pose.cast<float>());
+            global_map += tmp_cloud;
+            
             scans_in_map++;
-            if(scans_in_map >= 50 && scans_in_map % 10 == 0){
-              // if(tmp_cloud_global_aligned_map.size() > 1e6){
-                // pcl::RandomSample<PointType> downsample;
-                // downsample.setInputCloud(tmp_cloud_global_aligned_map.makeShared());
-                // downsample.setSample(0.7 * tmp_cloud_global_aligned_map.points.size());
-                // downsample.filter(tmp_cloud_global_aligned_map);
-                pcl::VoxelGrid<PointType> downSizeFilter;
-                downSizeFilter.setLeafSize(0.08, 0.08, 0.08);
-                downSizeFilter.setInputCloud(tmp_cloud_global_aligned_map.makeShared());
-                downSizeFilter.filter(tmp_cloud_global_aligned_map);
-              // }
-              PointCloudXYZI tmp_cloud_global_aligned_map_local;
-              pcl::transformPointCloud(tmp_cloud_global_aligned_map, tmp_cloud_global_aligned_map_local, global_horizon_pose.inverse().cast<float>());
+            if(scans_in_map >= 100 && scans_in_map % 10 == 0){
+              pcl::VoxelGrid<PointType> downSizeFilter;
+              downSizeFilter.setLeafSize(0.08, 0.08, 0.08);
+              downSizeFilter.setInputCloud(global_map.makeShared());
+              downSizeFilter.filter(global_map);
+              pcl::transformPointCloud(global_map, global_map_aligned, delta_pose.cast<float>());
+              Eigen::Matrix<double, 4, 4> current_pose_global_horizon = delta_pose * lidar_pose;
+              Eigen::Matrix3d current_rot_horizon_global_horizon = GetHorizon(current_pose_global_horizon.topLeftCorner(3, 3));
+              Eigen::Matrix<double, 4, 4> current_pose_horizon_global_horizon;
+              current_pose_horizon_global_horizon << current_rot_horizon_global_horizon, current_pose_global_horizon.topRightCorner(3, 1),
+                                                      0.0, 0.0, 0.0, 1.0;
+              PointCloudXYZI map_in_current_horizon;
+              pcl::transformPointCloud(global_map_aligned, map_in_current_horizon, current_pose_horizon_global_horizon.inverse().cast<float>());
+
+              Eigen::Matrix<double, 4, 4> current_pose_delta = current_pose_horizon_global_horizon.inverse() * current_pose_global_horizon;
               {
                 PointType p;
                 for(int i = 0; i < 3; ++i){
-                  p.x = delta_rot(i, 0);
-                  p.y = delta_rot(i, 1);
-                  p.z = delta_rot(i, 2);
+                  p.x = current_pose_delta(i, 0);
+                  p.y = current_pose_delta(i, 1);
+                  p.z = current_pose_delta(i, 2);
                   p.intensity = 0.0;
-                  tmp_cloud_global_aligned_map_local.push_back(p);//! 把姿态矫正量带进点云
+                  map_in_current_horizon.push_back(p);//! 把姿态矫正量带进点云
                 }  
               }
               sensor_msgs::PointCloud2 laserCloudmsg;
-              pcl::toROSMsg(tmp_cloud_global_aligned_map_local, laserCloudmsg);
+              pcl::toROSMsg(map_in_current_horizon, laserCloudmsg);
               laserCloudmsg.header.stamp = ros::Time().fromSec(lidar_end_time);
               laserCloudmsg.header.frame_id = "camera_init";
               pubLaserCloudTmp.publish(laserCloudmsg);
@@ -1053,17 +1062,14 @@ int main(int argc, char** argv)
               delta_odo.pose.pose.position.x = 0.0;
               delta_odo.pose.pose.position.y = 0.0;
               delta_odo.pose.pose.position.z = 0.0;
-              Eigen::Quaterniond q(delta_rot);
+              Eigen::Quaterniond q(Eigen::Matrix<double, 3, 3>(current_pose_delta.topLeftCorner(3, 3)));
               delta_odo.pose.pose.orientation.x = q.x();
               delta_odo.pose.pose.orientation.y = q.y();
               delta_odo.pose.pose.orientation.z = q.z();
               delta_odo.pose.pose.orientation.w = q.w();
               pubDeltaOdom.publish(delta_odo);
             }
-
-
             
-
             /******* Publish odometry *******/
             publish_odometry(pubOdomAftMapped);
 
